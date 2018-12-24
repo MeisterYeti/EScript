@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------------
 #include "StdLib.h"
 
+#include "../EScript/EScript.h"
 #include "../EScript/Basics.h"
 #include "../EScript/StdObjects.h"
 #include "../EScript/Objects/Callables/UserFunction.h"
@@ -21,17 +22,13 @@
 #include <ctime>
 #include <iostream>
 #include <sstream>
-
-#if defined(_MSC_VER)
-#include <process.h>
-#define EXECV _execv
-#else
 #include <unistd.h>
-#define EXECV execv
-#endif
 
 #if defined(_WIN32)
 #include <windows.h>
+#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__)
+#include <stdio.h>
+#include <dlfcn.h>
 #endif
 
 namespace EScript{
@@ -165,6 +162,46 @@ LARGE_INTEGER _getPerformanceCounter(){
 }
 
 #endif
+
+static bool loadELibrary(const std::string& library) {	
+	libInitFunction * f = nullptr; // Function pointer
+
+	#if defined(_WIN32) || defined(_WIN64)
+		std::string fullName = library + ".dll";
+		HINSTANCE hDLL = LoadLibrary(fullName.c_str());
+		if(hDLL == nullptr)
+			return false;
+
+		f = reinterpret_cast<libInitFunction*>(GetProcAddress(hDLL,"init"));
+		if(!f)	{
+			// handle the error
+			FreeLibrary(hDLL);
+			return false;
+		}
+	#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__)
+	
+		#if defined(__APPLE__)
+			std::string fullName = library + ".dylib";
+		#else
+			std::string fullName = library + ".so";
+		#endif
+		
+		void* handle = dlopen(fullName.c_str(), RTLD_NOW|RTLD_LOCAL);
+		if (handle == nullptr)
+			return false;
+			
+		f = reinterpret_cast<libInitFunction*>(dlsym(handle,"init"));
+		if (!f) {
+			dlclose(handle);
+			return false;
+		}
+	#else
+		return false;
+	#endif
+	
+	EScript::initLibrary(f);
+	return true;
+}
 
 // -------------------------------------------------------------
 //! init  (globals)
@@ -345,7 +382,7 @@ void StdLib::init(EScript::Namespace * globals) {
 		}
 		argv[argc] = nullptr;
 
-		Number * result = create(EXECV(parameter[0].toString().c_str(), argv));
+		Number * result = create(execv(parameter[0].toString().c_str(), argv));
 
 		for(uint_fast32_t i = 0; i < argc; ++i) {
 			delete [] argv[i];
@@ -361,6 +398,9 @@ void StdLib::init(EScript::Namespace * globals) {
 	//! [ESF]  string toJSON(obj[,formatted = true])
 	ES_FUN(globals,"toJSON",1,2,JSON::toJSON(parameter[0].get(),parameter[1].toBool(true)))
 
+	
+	//! [ESF]	bool loadLibrary(string )
+	ES_FUN(globals,"loadLibrary",1,1,loadELibrary(parameter[0].toString()))
 }
 
 
