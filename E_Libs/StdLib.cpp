@@ -118,6 +118,7 @@ static std::string findFile(Runtime & runtime, const std::string & filename){
 			for(ERef<Iterator> itRef = searchPaths->getIterator();!itRef->end();itRef->next()){
 				ObjRef valueRef = itRef->value();
 				std::string s(IO::condensePath(valueRef.toString()+'/'+filename));
+				std::cout << "search " << s << std::endl;
 				if( IO::getEntryType(s)==IO::TYPE_FILE ){
 					file = s;
 					break;
@@ -163,17 +164,17 @@ LARGE_INTEGER _getPerformanceCounter(){
 
 #endif
 
-static bool loadELibrary(const std::string& library) {	
-	libInitFunction * f = nullptr; // Function pointer
-
+static bool loadELibrary(Runtime& runtime, EScript::Namespace* globals, const std::string& library) {	
+	libInitFunction * initLibrary = nullptr; // Function pointer
+	
 	#if defined(_WIN32) || defined(_WIN64)
-		std::string fullName = library + ".dll";
-		HINSTANCE hDLL = LoadLibrary(fullName.c_str());
+		std::string libPath = findFile(runtime, library + ".dll");
+		HINSTANCE hDLL = LoadLibrary(libPath.c_str());
 		if(hDLL == nullptr)
 			return false;
 
-		f = reinterpret_cast<libInitFunction*>(GetProcAddress(hDLL,"init"));
-		if(!f)	{
+		initLibrary = reinterpret_cast<libInitFunction*>(GetProcAddress(hDLL,"init"));
+		if(!initLibrary)	{
 			// handle the error
 			FreeLibrary(hDLL);
 			return false;
@@ -181,17 +182,20 @@ static bool loadELibrary(const std::string& library) {
 	#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__)
 	
 		#if defined(__APPLE__)
-			std::string fullName = library + ".dylib";
+			std::string libPath = findFile(runtime, library + ".dylib");
 		#else
-			std::string fullName = library + ".so";
+			std::string libPath = findFile(runtime, library + ".so");
 		#endif
-		
-		void* handle = dlopen(fullName.c_str(), RTLD_NOW|RTLD_LOCAL);
-		if (handle == nullptr)
+		if(libPath.find("/") == std::string::npos)
+			libPath = "./" + libPath; // need to prepend "./" for some distributions
+		void* handle = dlopen(libPath.c_str(), RTLD_NOW|RTLD_LOCAL);
+		if (handle == nullptr) {
+			std::cerr << dlerror() << std::endl;
 			return false;
+		}
 			
-		f = reinterpret_cast<libInitFunction*>(dlsym(handle,"init"));
-		if (!f) {
+		initLibrary = reinterpret_cast<libInitFunction*>(dlsym(handle,"init"));
+		if (!initLibrary) {
 			dlclose(handle);
 			return false;
 		}
@@ -199,7 +203,8 @@ static bool loadELibrary(const std::string& library) {
 		return false;
 	#endif
 	
-	EScript::initLibrary(f);
+	//EScript::initLibrary(f);
+	initLibrary(globals);
 	return true;
 }
 
@@ -400,7 +405,7 @@ void StdLib::init(EScript::Namespace * globals) {
 
 	
 	//! [ESF]	bool loadLibrary(string )
-	ES_FUN(globals,"loadLibrary",1,1,loadELibrary(parameter[0].toString()))
+	ES_FUN(globals,"loadLibrary",1,1,loadELibrary(rt, thisEObj.to<Namespace*>(rt), parameter[0].toString()))
 }
 
 
